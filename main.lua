@@ -134,9 +134,7 @@ end
 ---@return integer|nil, Output|nil
 local function run_command(cmd, args, _stdin)
 	local cwd = current_dir()
-	cwd = tostring(
-		cwd.scheme and cwd.scheme.is_virtual and Url(cwd.scheme.cache .. tostring(cwd.path)).parent or cwd.path or cwd
-	)
+	cwd = tostring(cwd.spec.is_virtual and Url(cwd.spec.cache .. tostring(cwd.path)).parent or cwd.path or cwd)
 
 	local stdin = _stdin or Command.PIPED
 	local child, cmd_err =
@@ -580,8 +578,8 @@ return {
 				enter(hovered_url, is_dir)
 				return
 			end
-			local is_virtual = hovered_url.scheme and hovered_url.scheme.is_virtual
-			local hovered_url_cached = is_virtual and Url(hovered_url.scheme.cache .. tostring(hovered_url.path))
+			local is_virtual = hovered_url.spec.is_virtual
+			local hovered_url_cached = is_virtual and Url(hovered_url.spec.cache .. tostring(hovered_url.path))
 				or hovered_url.path
 				or hovered_url
 			if is_virtual and not fs.cha(hovered_url_cached) then
