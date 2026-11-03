@@ -1,4 +1,4 @@
---- @since 25.5.31
+--- @since 26.9.1
 
 local shell = os.getenv("SHELL") or ""
 ---@enum FUSE_ARCHIVE_RETURN_CODE
@@ -98,13 +98,13 @@ local is_mount_point = ya.sync(function(state)
 	return false
 end)
 
----@return Url|nil, boolean|nil
+---@return Url|nil, boolean|nil, string|nil
 local current_file = ya.sync(function()
 	local h = cx.active.current.hovered
 	if not h then
 		return
 	end
-	return h.url, h.cha.is_dir
+	return h.url, h.stat.is_dir, tostring(h.path)
 end)
 
 local current_dir = ya.sync(function()
@@ -133,12 +133,8 @@ end
 ---@param _stdin? STD_STREAM|nil
 ---@return integer|nil, Output|nil
 local function run_command(cmd, args, _stdin)
-	local cwd = current_dir()
-	cwd = tostring(cwd.spec.is_virtual and Url(cwd.spec.cache .. tostring(cwd.path)).parent or cwd.path or cwd)
-
 	local stdin = _stdin or Command.PIPED
-	local child, cmd_err =
-		Command(cmd):arg(args):cwd(cwd):stdin(stdin):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
+	local child, cmd_err = Command(cmd):arg(args):stdin(stdin):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
 
 	if not child then
 		error("Failed to start `%s` failed with error: %s", cmd, cmd_err)
@@ -420,9 +416,10 @@ end
 
 ---Mount path using inode (unique for each files)
 ---@param file_url Url
+---@param fname? string Original filename, before VFS cache mapping.
 ---@return string|nil
-local function tmp_file_name(file_url)
-	local fname = file_url.name
+local function tmp_file_name(file_url, fname)
+	fname = fname or file_url.name
 	local cmd_err_code, res = run_command(shell, { "-c", "xxh128sum -q " .. path_quote(file_url) })
 	if cmd_err_code or res == nil or res.status.code ~= 0 then
 		error("Cannot create unique path of file %s", fname)
@@ -435,10 +432,10 @@ end
 local function unmount_on_quit()
 	redirect_mounted_tab_to_home()
 	local mount_root_dir = get_state("global", "mount_root_dir")
-	local unmount_script =
-		path_quote(os.getenv("HOME") .. "/.config/yazi/plugins/fuse-archive.yazi/assets/unmount_on_quit.sh")
-	os.execute("chmod +x " .. unmount_script)
-	os.execute(unmount_script .. " " .. path_quote(mount_root_dir))
+	local config_dir = os.getenv("YAZI_CONFIG_HOME")
+		or (os.getenv("XDG_CONFIG_HOME") or os.getenv("HOME") .. "/.config") .. "/yazi"
+	local unmount_script = path_quote(config_dir .. "/plugins/fuse-archive.yazi/assets/unmount_on_quit.sh")
+	os.execute("bash " .. unmount_script .. " " .. path_quote(mount_root_dir))
 end
 
 local function fuse_archive_version()
@@ -566,9 +563,16 @@ return {
 
 		unsub_download()
 		if action == "mount" then
-			local hovered_url, is_dir = job.args.url and Url(job.args.url), false
-			if not hovered_url then
-				hovered_url, is_dir = current_file()
+			local hovered_url, is_dir, local_path
+			if job.args.url then
+				local file, err = fs.file(Url(job.args.url))
+				if not file then
+					error("Cannot read archive file: %s", tostring(err))
+					return
+				end
+				hovered_url, is_dir, local_path = file.url, file.stat.is_dir, tostring(file.path)
+			else
+				hovered_url, is_dir, local_path = current_file()
 			end
 			if hovered_url == nil then
 				return
@@ -578,16 +582,14 @@ return {
 				enter(hovered_url, is_dir)
 				return
 			end
-			local is_virtual = hovered_url.spec.is_virtual
-			local hovered_url_cached = is_virtual and Url(hovered_url.spec.cache .. tostring(hovered_url.path))
-				or hovered_url.path
-				or hovered_url
-			if is_virtual and not fs.cha(hovered_url_cached) then
+			-- File.path resolves both local files and the cache of a VFS file.
+			local hovered_url_cached = Url(local_path)
+			if not hovered_url.spec.is_regular and not fs.stat(hovered_url_cached) then
 				sub_download(tostring(hovered_url), job)
 				ya.emit("download", { tostring(hovered_url) })
 				return
 			end
-			local tmp_fname = tmp_file_name(hovered_url_cached)
+			local tmp_fname = tmp_file_name(hovered_url_cached, hovered_url.name)
 			if not tmp_fname then
 				return
 			end

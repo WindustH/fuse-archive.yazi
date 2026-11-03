@@ -15,6 +15,8 @@
     - [fuse-archive.yazi:](#fuse-archiveyazi)
     - [Setup options](#setup-options)
   - [Key mapping](#key-mapping)
+  - [Nightly compatibility](#nightly-compatibility)
+  - [Validation](#validation)
   <!--toc:end-->
 
 <!--toc:start-->
@@ -37,7 +39,7 @@ mount and unmount the archives manually.
 ## What news with this fork
 
 > [!IMPORTANT]
-> Minimum version: yazi v25.5.31.
+> Target: current Yazi nightly. Verified with `26.9.1 (606096f 2026-11-02)`.
 >
 > Password-protected RAR file is not supported yet!
 
@@ -130,7 +132,7 @@ This plugin supports MacOS, but you need to install `macfuse` instead of `fuse3`
 ### fuse-archive.yazi:
 
 ```sh
-ya pkg add boydaihungst/fuse-archive
+ya pkg add WindustH/fuse-archive
 ```
 
 Modify your `~/.config/yazi/init.lua` to include:
@@ -209,3 +211,46 @@ following:
 1. `/tmp/yazi/fuse-archive/...` by default.
 2. Or if you set `mount_root_dir` option in `setup()` function, it will be
    `mount_root_dir/yazi/fuse-archive/...` in your `mount_root_dir` directory.
+
+## Nightly compatibility
+
+This fork uses `File.stat`, `fs.stat()`, and `File.path` instead of the old
+`File.cha`, `fs.cha()`, `Spec.is_virtual`, and `Spec.cache` APIs. `File.path`
+provides the local path for regular files and the cache path for VFS files.
+Remote archives still download before mounting, and their mount directories
+retain the original archive filename even when the VFS cache uses a hashed name.
+
+Quit cleanup respects `YAZI_CONFIG_HOME` and `XDG_CONFIG_HOME`. It runs the
+cleanup script through Bash without changing the installed script's permissions.
+On Linux, busy read-only mounts are detached during quit and released when Yazi
+and nested archive processes close their remaining handles.
+
+To update an existing installation of this fork through Yazi's package manager:
+
+```sh
+ya pkg upgrade WindustH/fuse-archive
+```
+
+Fully restart running Yazi instances after upgrading to reload the plugin.
+
+## Validation
+
+```sh
+luac -p main.lua
+stylua --check main.lua
+python3 tests/nightly_smoke.py
+```
+
+The smoke test starts the installed Yazi with temporary configuration and
+simulates the FUSE commands. It checks nested archives, quoted and Unicode
+filenames, normal directory/file navigation, returning to the original directory,
+reusing existing mounts, explicit URL entry, and quit cleanup. It requires Linux,
+Python 3, Bash, `yazi`, and `xxh128sum`; it does not require `/dev/fuse` or create
+real mounts. Actual FUSE mounting needs a separate check on the host system.
+
+To run the same checks with real FUSE mounts (requires `/dev/fuse` and
+`fuse-archive`), use:
+
+```sh
+python3 tests/nightly_smoke.py --real-fuse
+```
